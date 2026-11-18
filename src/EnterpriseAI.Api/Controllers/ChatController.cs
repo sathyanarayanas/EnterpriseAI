@@ -1,9 +1,9 @@
 ﻿
-using System.Diagnostics;
 using EnterpriseAI.Application.Interfaces;
 using EnterpriseAI.Application.Models;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
 
 namespace EnterpriseAI.Api.Controllers;
 
