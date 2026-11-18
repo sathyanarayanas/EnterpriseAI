@@ -1,0 +1,101 @@
+# Enterprise AI Knowledge Assistant
+
+## 1. Business Problem
+
+Enterprise employees currently spend significant time searching through
+large volumes of internal documents.
+
+The organization wants an AI-powered knowledge assistant that allows
+employees to ask questions using natural language and receive answers
+based on approved enterprise documents.
+
+## 2. Business Goals
+
+- Reduce time spent searching for information
+- Provide natural-language access to enterprise knowledge
+- Provide source citations for generated answers
+- Maintain enterprise security
+- Prevent unauthorized access to documents
+- Provide monitoring and auditability
+- Support future integration with enterprise applications
+
+## 3. Target Users
+
+- Employees
+- Support teams
+- Operations teams
+- Managers
+- Administrators
+
+## 4. Core Use Cases
+
+### UC-01: Ask a question
+
+Employee asks:
+
+"What is the enterprise leave policy?"
+
+The assistant retrieves relevant documents and generates an answer.
+
+### UC-02: Document upload
+
+Administrator uploads an approved enterprise document.
+
+### UC-03: Source citation
+
+The assistant displays the documents/chunks used to generate the answer.
+
+### UC-04: Conversation history
+
+Users can view their previous conversations.
+
+### UC-05: Document administration
+
+Administrators can upload, view and remove documents.
+
+## 5. Non-Functional Requirements
+
+### Security
+
+- Authentication required
+- Role-based authorization
+- Secure access to documents
+- Secrets must not be stored in source code
+
+### Performance
+
+Target response time:
+
+- Initial response: less than 3 seconds where practical
+- Search: less than 2 seconds where practical
+
+### Availability
+
+The application should be designed for production deployment
+and horizontal scaling.
+
+### Observability
+
+The system should capture:
+
+- API requests
+- Exceptions
+- Dependency failures
+- AI request metrics
+- Search latency
+- Application performance
+
+## 6. Initial MVP
+
+The first version will support:
+
+1. User authentication
+2. Document upload
+3. Document processing
+4. Document indexing
+5. Natural-language questions
+6. RAG-based answers
+7. Source citations
+8. Conversation history
+9. Basic administration
+10. Monitoring

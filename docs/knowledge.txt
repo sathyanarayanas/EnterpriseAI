@@ -1,0 +1,42 @@
+Enterprise Application Development
+
+Dependency Injection
+
+Dependency Injection is a design pattern that allows
+objects to receive their dependencies from an external
+source instead of creating them directly.
+
+ASP.NET Core provides a built-in dependency injection
+container.
+
+Services can be registered using AddSingleton,
+AddScoped and AddTransient.
+
+AddSingleton creates a single instance for the lifetime
+of the application.
+
+AddScoped creates one instance per request scope.
+
+AddTransient creates a new instance whenever requested.
+
+CQRS
+
+CQRS stands for Command Query Responsibility Segregation.
+
+CQRS separates operations that modify data from operations
+that read data.
+
+This approach can be useful when read and write workloads
+have different requirements.
+
+RAG
+
+Retrieval-Augmented Generation combines information
+retrieval with generative AI.
+
+A RAG system retrieves relevant information from a
+knowledge base and provides that information to an LLM
+as context.
+
+This helps reduce hallucinations and allows an AI
+application to answer questions using enterprise data.

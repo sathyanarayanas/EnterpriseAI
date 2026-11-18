@@ -1,0 +1,50 @@
+# Solution Architecture
+
+## High-Level Architecture
+
+User
+  |
+  v
+Angular Application
+  |
+  v
+Azure Front Door
+  |
+  v
+.NET 8 Web API
+  |
+  +----------------------+
+  |                      |
+  v                      v
+Azure OpenAI        Azure SQL
+  |
+  v
+Azure AI Search
+  |
+  v
+Azure Blob Storage
+
+Document Processing:
+
+Angular
+   |
+   v
+.NET API
+   |
+   v
+Blob Storage
+   |
+   v
+Service Bus
+   |
+   v
+Azure Function
+   |
+   v
+Document Processing
+   |
+   v
+Embeddings
+   |
+   v
+Azure AI Search
