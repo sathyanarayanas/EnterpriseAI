@@ -32,6 +32,7 @@ public class SearchController : ControllerBase
             cancellationToken);
 
         var results = await _documentSearchService.SearchAsync(
+            request.Query,
             embedding,
             request.TopK,
             cancellationToken);

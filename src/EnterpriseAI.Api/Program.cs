@@ -12,16 +12,18 @@ using EnterpriseAI.Infrastructure.Search;
 using EnterpriseAI.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
+using Microsoft.AspNetCore.Http.Timeouts;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddRequestTimeouts();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddScoped<IConversationRepository, ConversationRepository>();
 builder.Services.AddSingleton<IDocumentChunkingService, DocumentChunkingService>();
 builder.Services.AddSingleton<IEmbeddingService, AzureOpenAIEmbeddingService>();
 builder.Services.AddScoped<IDocumentTextExtractor, DocumentTextExtractor>();
 builder.Services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
-builder.Services.AddScoped<IDocumentSearchIndexService, AzureDocumentSearchIndexService>();
 builder.Services.AddScoped<IDocumentSearchIndexService, AzureDocumentSearchIndexService>();
 builder.Services.AddScoped<IDocumentSearchService, AzureDocumentSearchService>();
 builder.Services.AddScoped<IConversationHistoryService, AzureTableConversationHistoryService>();
@@ -56,19 +58,6 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "Azure Storage connection string is missing.");
 }
 
-//var azureBlobOptions = new AzureBlobOptions
-//{
-//    ConnectionString =
-//        builder.Configuration[
-//            "AzureBlob:ConnectionString"]
-//        ?? throw new InvalidOperationException(
-//            "Azure Blob connection string is not configured."),
-
-//    ContainerName =
-//        builder.Configuration[
-//            "AzureBlob:ContainerName"]
-//        ?? "knowledge-documents"
-//};
 
 builder.Services.Configure<AzureStorageOptions>(
     builder.Configuration.GetSection("AzureStorage"));
@@ -97,19 +86,19 @@ else
 }
 
 builder.Services.AddEndpointsApiExplorer();
-//builder.Services.AddSingleton(
-//    azureBlobOptions);
 
 builder.Services.AddScoped<
     IDocumentStorageService,
     AzureBlobDocumentService>();
 var app = builder.Build();
 
+app.UseExceptionHandler();
+app.UseRequestTimeouts();
 // Swagger middleware
 if (app.Environment.IsDevelopment())
 {
     // Show detailed exceptions in development to help diagnose errors
-    app.UseDeveloperExceptionPage();
+    //app.UseDeveloperExceptionPage();
 
     app.UseSwagger();
 

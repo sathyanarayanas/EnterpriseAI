@@ -3,7 +3,7 @@ using EnterpriseAI.Application.Interfaces;
 using EnterpriseAI.Application.Models;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
-
+using System.Diagnostics;
 namespace EnterpriseAI.Application.Services;
 
 public class ChatService : IChatService
@@ -28,10 +28,21 @@ public class ChatService : IChatService
         _logger = logger;
     }
 
+
     public async Task<ChatResponse> SendMessageAsync(
         ChatRequest request,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var correlationId =
+            Activity.Current?.TraceId.ToString()
+            ?? Guid.NewGuid().ToString("N");
+
+        _logger.LogInformation(
+            "Chat request started. CorrelationId: {CorrelationId}",
+            correlationId);
+
         if (string.IsNullOrWhiteSpace(request.Message))
         {
             throw new ArgumentException(
@@ -59,10 +70,12 @@ public class ChatService : IChatService
         historyStopwatch.Stop();
 
         _logger.LogInformation(
-            "Conversation history retrieval completed. ConversationId: {ConversationId}, MessagesRetrieved: {MessagesRetrieved}, LatencyMs: {LatencyMs}",
+            "Conversation history retrieval completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, MessagesRetrieved: {MessagesRetrieved}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             history.Count,
             historyStopwatch.ElapsedMilliseconds);
+
         // Step 2: Save the current user message.
         var userSaveStopwatch = Stopwatch.StartNew();
 
@@ -70,7 +83,7 @@ public class ChatService : IChatService
             new ConversationMessage
             {
                 ConversationId = conversationId,
-                MessageId = Guid.NewGuid().ToString(),
+                MessageId = $"{DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks:D19}_{Guid.NewGuid():N}",
                 Role = "user",
                 Content = request.Message,
                 CreatedAtUtc = DateTime.UtcNow
@@ -80,11 +93,12 @@ public class ChatService : IChatService
         userSaveStopwatch.Stop();
 
         _logger.LogInformation(
-            "User message storage completed. ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            "User message storage completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             userSaveStopwatch.ElapsedMilliseconds);
 
-        // Step 3: Rewrite the question using conversation history.
+        // Step 3: Rewrite the question only when it appears to be a follow-up.
         string searchQuery;
 
         if (history.Count == 0)
@@ -92,7 +106,17 @@ public class ChatService : IChatService
             searchQuery = request.Message;
 
             _logger.LogInformation(
-                "Query rewriting skipped because conversation history is empty. ConversationId: {ConversationId}",
+                "Query rewriting skipped because conversation history is empty. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}",
+                correlationId,
+                conversationId);
+        }
+        else if (!RequiresQueryRewriting(request.Message))
+        {
+            searchQuery = request.Message;
+
+            _logger.LogInformation(
+                "Query rewriting skipped because the message appears to be standalone. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}",
+                correlationId,
                 conversationId);
         }
         else
@@ -108,18 +132,20 @@ public class ChatService : IChatService
             rewriteStopwatch.Stop();
 
             _logger.LogInformation(
-                "Query rewriting completed. ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+                "Query rewriting completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+                correlationId,
                 conversationId,
                 rewriteStopwatch.ElapsedMilliseconds);
         }
 
         _logger.LogInformation(
-            "Query rewritten. ConversationId: {ConversationId}, OriginalQuery: {OriginalQuery}, RewrittenQuery: {RewrittenQuery}",
+            "Query processed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, OriginalQueryLength: {OriginalQueryLength}, SearchQueryLength: {SearchQueryLength}",
+            correlationId,
             conversationId,
-            request.Message,
-            searchQuery);
+            request.Message.Length,
+            searchQuery.Length);
 
-        // Step 4: Generate embedding from rewritten query.
+        // Step 4: Generate embedding from the search query.
         var embeddingStopwatch = Stopwatch.StartNew();
 
         var queryEmbedding =
@@ -130,7 +156,8 @@ public class ChatService : IChatService
         embeddingStopwatch.Stop();
 
         _logger.LogInformation(
-            "Query embedding generation completed. ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            "Query embedding generation completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             embeddingStopwatch.ElapsedMilliseconds);
 
@@ -139,6 +166,7 @@ public class ChatService : IChatService
 
         var retrievedChunks =
             await _documentSearchService.SearchAsync(
+                searchQuery,
                 queryEmbedding,
                 topK: 5,
                 cancellationToken);
@@ -146,15 +174,11 @@ public class ChatService : IChatService
         searchStopwatch.Stop();
 
         _logger.LogInformation(
-            "Document search completed. ConversationId: {ConversationId}, RetrievedChunks: {RetrievedChunks}, LatencyMs: {LatencyMs}",
+            "Document search completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, RetrievedChunks: {RetrievedChunks}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             retrievedChunks.Count,
             searchStopwatch.ElapsedMilliseconds);
-
-        _logger.LogInformation(
-            "Document retrieval completed. ConversationId: {ConversationId}, RetrievedChunks: {RetrievedChunks}",
-            conversationId,
-            retrievedChunks.Count);
 
         foreach (var source in retrievedChunks
             .Select(x => x.FileName)
@@ -162,14 +186,17 @@ public class ChatService : IChatService
             .Distinct())
         {
             _logger.LogInformation(
-                "Retrieved source document: {Source}",
+                "Retrieved source document. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, Source: {Source}",
+                correlationId,
+                conversationId,
                 source);
         }
 
         foreach (var chunk in retrievedChunks)
         {
             _logger.LogInformation(
-                "Retrieved chunk. ConversationId: {ConversationId}, FileName: {FileName}, ChunkIndex: {ChunkIndex}, RelevanceScore: {RelevanceScore}",
+                "Retrieved chunk. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, FileName: {FileName}, ChunkIndex: {ChunkIndex}, RelevanceScore: {RelevanceScore}",
+                correlationId,
                 conversationId,
                 chunk.FileName,
                 chunk.ChunkIndex,
@@ -183,7 +210,8 @@ public class ChatService : IChatService
                 .ToList();
 
             _logger.LogInformation(
-                "Retrieval quality metrics. ConversationId: {ConversationId}, AverageScore: {AverageScore}, MaxScore: {MaxScore}, MinScore: {MinScore}",
+                "Retrieval quality metrics. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, AverageScore: {AverageScore}, MaxScore: {MaxScore}, MinScore: {MinScore}",
+                correlationId,
                 conversationId,
                 scores.Average(),
                 scores.Max(),
@@ -200,7 +228,7 @@ public class ChatService : IChatService
                 new ConversationMessage
                 {
                     ConversationId = conversationId,
-                    MessageId = $"{DateTime.UtcNow:yyyyMMddHHmmssfffffff}_{Guid.NewGuid():N}",
+                    MessageId = $"{DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks:D19}_{Guid.NewGuid():N}",
                     Role = "assistant",
                     Content = fallbackAnswer,
                     CreatedAtUtc = DateTime.UtcNow
@@ -210,7 +238,8 @@ public class ChatService : IChatService
             stopwatch.Stop();
 
             _logger.LogInformation(
-                "RAG pipeline completed without relevant documents. ConversationId: {ConversationId}, TotalLatencyMs: {TotalLatencyMs}",
+                "RAG pipeline completed without relevant documents. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, TotalLatencyMs: {TotalLatencyMs}",
+                correlationId,
                 conversationId,
                 stopwatch.ElapsedMilliseconds);
 
@@ -227,12 +256,14 @@ public class ChatService : IChatService
             "\n\n",
             retrievedChunks.Select(chunk =>
                 $"""
-                Source: {chunk.FileName}
-                Content:
-                {chunk.Content}
-                """));
+            Source: {chunk.FileName}
+            Content:
+            {chunk.Content}
+            """));
 
         // Step 8: Generate grounded AI response.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var answerStopwatch = Stopwatch.StartNew();
 
         var answer =
@@ -245,19 +276,19 @@ public class ChatService : IChatService
         answerStopwatch.Stop();
 
         _logger.LogInformation(
-            "AI answer generation completed. ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            "AI answer generation completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             answerStopwatch.ElapsedMilliseconds);
 
         // Step 9: Save assistant response.
-        // Step 9: Save assistant response and measure storage latency.
         var assistantSaveStopwatch = Stopwatch.StartNew();
 
         await _conversationHistoryService.SaveMessageAsync(
             new ConversationMessage
             {
                 ConversationId = conversationId,
-                MessageId = $"{DateTime.UtcNow:yyyyMMddHHmmssfffffff}_{Guid.NewGuid():N}",
+                MessageId = $"{DateTime.MaxValue.Ticks - DateTime.UtcNow.Ticks:D19}_{Guid.NewGuid():N}",
                 Role = "assistant",
                 Content = answer,
                 CreatedAtUtc = DateTime.UtcNow
@@ -267,15 +298,17 @@ public class ChatService : IChatService
         assistantSaveStopwatch.Stop();
 
         _logger.LogInformation(
-            "Assistant message storage completed. ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            "Assistant message storage completed. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, LatencyMs: {LatencyMs}",
+            correlationId,
             conversationId,
             assistantSaveStopwatch.ElapsedMilliseconds);
 
-        // Step 10: Log successful end-to-end RAG latency.
+        // Step 10: Log end-to-end RAG latency.
         stopwatch.Stop();
 
         _logger.LogInformation(
-            "RAG pipeline completed successfully. ConversationId: {ConversationId}, RetrievedChunks: {RetrievedChunks}, TotalLatencyMs: {TotalLatencyMs}",
+            "RAG pipeline completed successfully. CorrelationId: {CorrelationId}, ConversationId: {ConversationId}, RetrievedChunks: {RetrievedChunks}, TotalLatencyMs: {TotalLatencyMs}",
+            correlationId,
             conversationId,
             retrievedChunks.Count,
             stopwatch.ElapsedMilliseconds);
@@ -291,5 +324,39 @@ public class ChatService : IChatService
                 .Distinct()
                 .ToList()
         };
+    }
+
+
+    // Identifies common contextual follow-up question patterns.
+    private static bool RequiresQueryRewriting(string message)
+    {
+        var followUpIndicators = new[]
+        {
+            "who should i contact",
+            "what about",
+            "how about",
+            "does that",
+            "is that",
+            "can they",
+            "should i",
+            "what if",
+            "and what",
+            "it ",
+            "that ",
+            "those ",
+            "them ",
+            "this ",
+            "these ",
+            "they ",
+            "he ",
+            "she "
+        };
+
+        var normalizedMessage = message
+            .Trim()
+            .ToLowerInvariant();
+
+        return followUpIndicators.Any(indicator =>
+            normalizedMessage.StartsWith(indicator));
     }
 }

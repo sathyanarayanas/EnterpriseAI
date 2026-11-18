@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using System.Diagnostics;
-
+using System.ClientModel.Primitives;
 namespace EnterpriseAI.Infrastructure.AI;
 
 public class AzureOpenAIService : IAiService
@@ -23,9 +23,16 @@ public class AzureOpenAIService : IAiService
         _logger = logger;
         _settings = options.Value;
 
+        var clientOptions = new AzureOpenAIClientOptions
+        {
+            RetryPolicy = new ClientRetryPolicy(maxRetries: 3),
+            NetworkTimeout = TimeSpan.FromSeconds(60)
+        };
+
         var client = new AzureOpenAIClient(
             new Uri(_settings.Endpoint),
-            new AzureKeyCredential(_settings.ApiKey));
+            new AzureKeyCredential(_settings.ApiKey),
+            clientOptions);
 
         _chatClient =
             client.GetChatClient(

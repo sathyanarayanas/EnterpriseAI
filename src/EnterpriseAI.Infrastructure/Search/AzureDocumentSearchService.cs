@@ -1,22 +1,29 @@
 ﻿
+using Azure.AI.OpenAI;
+using Azure.Core;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using EnterpriseAI.Application.Interfaces;
 using EnterpriseAI.Application.Models;
 using EnterpriseAI.Infrastructure.Configuration;
 using Microsoft.Extensions.Options;
-
+using System.ClientModel.Primitives;
 namespace EnterpriseAI.Infrastructure.Search;
 
 public class AzureDocumentSearchService : IDocumentSearchService
 {
     private readonly SearchClient _searchClient;
-    private readonly double _minimumRelevanceScore;
+
     public AzureDocumentSearchService(
         IOptions<AzureAISearchOptions> options)
     {
         var settings = options.Value;
-        _minimumRelevanceScore = settings.MinimumRelevanceScore;
+
+        var clientOptions = new AzureOpenAIClientOptions
+        {
+            RetryPolicy = new ClientRetryPolicy(maxRetries: 3),
+            NetworkTimeout = TimeSpan.FromSeconds(60)
+        };
         _searchClient = new SearchClient(
             new Uri(settings.Endpoint),
             settings.IndexName,
@@ -24,20 +31,36 @@ public class AzureDocumentSearchService : IDocumentSearchService
     }
 
     public async Task<IReadOnlyList<DocumentChunk>> SearchAsync(
+        string searchQuery,
         float[] queryEmbedding,
         int topK = 5,
         CancellationToken cancellationToken = default)
-            {
-                if (queryEmbedding is null || queryEmbedding.Length != 1536 || queryEmbedding.Any(value => float.IsNaN(value) 
-                || float.IsInfinity(value)))
-                {
-                    throw new ArgumentException(
-                        "Query embedding must contain 1536 valid finite values.",
-                        nameof(queryEmbedding));
-        }       
+    {
+        if (topK <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(topK),
+                "topK must be greater than zero.");
+        }
 
-        var vectorQuery = new VectorizedQuery(
-            queryEmbedding)
+        if (string.IsNullOrWhiteSpace(searchQuery))
+        {
+            throw new ArgumentException(
+                "Search query cannot be empty.",
+                nameof(searchQuery));
+        }
+
+        if (queryEmbedding is null ||
+            queryEmbedding.Length != 1536 ||
+            queryEmbedding.Any(value =>
+                float.IsNaN(value) || float.IsInfinity(value)))
+        {
+            throw new ArgumentException(
+                "Query embedding must contain 1536 valid finite values.",
+                nameof(queryEmbedding));
+        }
+
+        var vectorQuery = new VectorizedQuery(queryEmbedding)
         {
             KNearestNeighborsCount = topK,
             Fields = { "contentVector" }
@@ -57,8 +80,9 @@ public class AzureDocumentSearchService : IDocumentSearchService
         searchOptions.Select.Add("chunkIndex");
         searchOptions.Select.Add("content");
 
+        // Hybrid search: keyword search + vector search.
         var response = await _searchClient.SearchAsync<SearchDocument>(
-            searchText: null,
+            searchText: searchQuery,
             searchOptions,
             cancellationToken);
 
@@ -66,11 +90,6 @@ public class AzureDocumentSearchService : IDocumentSearchService
 
         await foreach (var result in response.Value.GetResultsAsync())
         {
-            var relevanceScore = result.Score;
-
-            if (relevanceScore < _minimumRelevanceScore)
-                continue;
-
             var document = result.Document;
 
             results.Add(new DocumentChunk
@@ -81,11 +100,10 @@ public class AzureDocumentSearchService : IDocumentSearchService
                 Content = document["content"].ToString()!,
                 FileName = document["fileName"].ToString()!,
                 CharacterCount = document["content"].ToString()!.Length,
-                RelevanceScore = relevanceScore.Value
+                RelevanceScore = result.Score ?? 0
             });
         }
 
         return results;
-
     }
 }

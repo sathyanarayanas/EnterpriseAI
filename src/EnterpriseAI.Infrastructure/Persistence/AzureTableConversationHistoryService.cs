@@ -43,36 +43,48 @@ public class AzureTableConversationHistoryService
     }
 
 
+
+
     public async Task<IReadOnlyList<ChatMessageContext>>
         GetHistoryAsync(
             string conversationId,
             int take = 10,
             CancellationToken cancellationToken = default)
     {
-        var history = new List<(string RowKey, ChatMessageContext Message)>();
+        if (take <= 0)
+        {
+            return [];
+        }
+
+        var history = new List<ChatMessageContext>();
 
         var query = _tableClient.QueryAsync<TableEntity>(
             filter: TableClient.CreateQueryFilter(
                 $"PartitionKey eq {conversationId}"),
+            maxPerPage: take,
             cancellationToken: cancellationToken);
 
-        await foreach (var entity in query.WithCancellation(cancellationToken))
+        await foreach (var entity in query
+            .WithCancellation(cancellationToken))
         {
-            history.Add((
-                entity.RowKey,
-                new ChatMessageContext
-                {
-                    Role = entity.GetString("Role") ?? string.Empty,
-                    Content = entity.GetString("Content") ?? string.Empty
-                }));
+            history.Add(new ChatMessageContext
+            {
+                Role = entity.GetString("Role") ?? string.Empty,
+                Content = entity.GetString("Content") ?? string.Empty
+            });
+
+            if (history.Count == take)
+            {
+                break;
+            }
         }
 
-        return history
-            .OrderByDescending(x => x.RowKey)
-            .Take(take)
-            .OrderBy(x => x.RowKey)
-            .Select(x => x.Message)
-            .ToList();
+        // Reverse newest-first results into chronological order.
+        history.Reverse();
+
+        return history;
     }
+
+
 
 }
